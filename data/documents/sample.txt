@@ -1,0 +1,43 @@
+# Welcome to RAG Document Q&A
+
+This is a sample document for testing the RAG (Retrieval-Augmented Generation) system.
+
+## What is RAG?
+
+RAG stands for Retrieval-Augmented Generation. It is a technique that combines information retrieval with text generation to answer questions based on a specific set of documents.
+
+## How does it work?
+
+1. Documents are loaded and split into smaller chunks.
+2. Each chunk is converted into an embedding vector using an embedding model.
+3. These embeddings are stored in a vector database (ChromaDB).
+4. When a user asks a question, the question is also converted to an embedding.
+5. The system finds the most similar document chunks using cosine similarity.
+6. The retrieved chunks and the question are sent to an LLM (like GPT-4o-mini).
+7. The LLM generates an answer based ONLY on the provided context.
+
+## Supported File Types
+
+- PDF files (.pdf)
+- Text files (.txt)
+- Markdown files (.md)
+- Python files (.py)
+- JavaScript/TypeScript files (.js, .ts)
+- HTML files (.html)
+- CSS files (.css)
+- JSON files (.json)
+- YAML files (.yaml, .yml)
+
+## About This Project
+
+This RAG Document Q&A system was built using:
+- Python for the backend
+- LangChain for the RAG pipeline
+- ChromaDB for vector storage
+- OpenAI for embeddings and LLM
+- Streamlit for the user interface
+
+To use it:
+1. Place your documents in the data/documents folder
+2. Click "Load & Index Documents" in the sidebar
+3. Start asking questions!
