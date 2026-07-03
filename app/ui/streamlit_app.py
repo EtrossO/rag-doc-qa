@@ -40,27 +40,33 @@ with st.sidebar:
 
     if st.button("🔄 Load & Index Documents", use_container_width=True):
         with st.spinner("Loading documents..."):
-            docs = load_documents(str(DOCS_DIR))
-            if not docs:
-                st.error(f"No documents found in {DOCS_DIR}. Add PDF or text files.")
-            else:
-                chunks = chunk_documents(docs, chunk_size=chunk_size, chunk_overlap=chunk_overlap)
-                vs = create_vectorstore(chunks, str(CHROMA_DIR), embedding_model=embedding_model)
-                chain = create_qa_chain(vs, model_name=model_name)
-                st.session_state.chain = chain
-                st.session_state.vectorstore_ready = True
-                st.success(f"✅ Indexed {len(docs)} doc(s) → {len(chunks)} chunk(s)")
+            try:
+                docs = load_documents(str(DOCS_DIR))
+                if not docs:
+                    st.error(f"No documents found in {DOCS_DIR}. Add PDF or text files.")
+                else:
+                    chunks = chunk_documents(docs, chunk_size=chunk_size, chunk_overlap=chunk_overlap)
+                    vs = create_vectorstore(chunks, str(CHROMA_DIR), embedding_model=embedding_model)
+                    chain = create_qa_chain(vs, model_name=model_name)
+                    st.session_state.chain = chain
+                    st.session_state.vectorstore_ready = True
+                    st.success(f"✅ Indexed {len(docs)} doc(s) → {len(chunks)} chunk(s)")
+            except Exception as e:
+                st.error(f"Failed to index documents: {e}")
 
     if st.button("📂 Load Existing Index", use_container_width=True):
         with st.spinner("Loading vector store..."):
-            vs = load_vectorstore(str(CHROMA_DIR), embedding_model=embedding_model)
-            if vs is None or vs._collection.count() == 0:
-                st.error("No existing index found. Ingest documents first.")
-            else:
-                chain = create_qa_chain(vs, model_name=model_name)
-                st.session_state.chain = chain
-                st.session_state.vectorstore_ready = True
-                st.success(f"✅ Loaded index with {vs._collection.count()} chunks")
+            try:
+                vs = load_vectorstore(str(CHROMA_DIR), embedding_model=embedding_model)
+                if vs is None or len(vs.get()["ids"]) == 0:
+                    st.error("No existing index found. Ingest documents first.")
+                else:
+                    chain = create_qa_chain(vs, model_name=model_name)
+                    st.session_state.chain = chain
+                    st.session_state.vectorstore_ready = True
+                    st.success(f"✅ Loaded index with {len(vs.get()['ids'])} chunks")
+            except Exception as e:
+                st.error(f"Failed to load index: {e}")
 
     st.divider()
     st.markdown("**📂 Documents folder:**")
@@ -85,24 +91,30 @@ if prompt := st.chat_input("Ask a question about your documents..."):
     else:
         with st.chat_message("assistant"):
             with st.spinner("Thinking..."):
-                result = st.session_state.chain.invoke({
-                    "input": prompt,
-                    "chat_history": [
-                        (m["role"], m["content"]) for m in st.session_state.messages[:-1]
-                    ],
-                })
-                response = result["answer"]
+                result = None
+                try:
+                    result = st.session_state.chain.invoke({
+                        "input": prompt,
+                        "chat_history": [
+                            (m["role"], m["content"]) for m in st.session_state.messages[:-1]
+                        ],
+                    })
+                    response = result["answer"]
+                except Exception as e:
+                    response = f"⚠️ Error generating response: {e}"
+
                 st.markdown(response)
 
-                with st.expander("🔍 View retrieved context"):
-                    for i, doc in enumerate(result["context"]):
-                        source = doc.metadata.get("source", "Unknown")
-                        page = doc.metadata.get("page", "")
-                        label = f"**Source {i+1}:** `{Path(source).name}`"
-                        if page:
-                            label += f" (page {page})"
-                        st.markdown(label)
-                        st.markdown(f"> {doc.page_content[:500]}...")
-                        st.divider()
+                if result and "context" in result:
+                    with st.expander("🔍 View retrieved context"):
+                        for i, doc in enumerate(result["context"]):
+                            source = doc.metadata.get("source", "Unknown")
+                            page = doc.metadata.get("page", "")
+                            label = f"**Source {i+1}:** `{Path(source).name}`"
+                            if page:
+                                label += f" (page {page})"
+                            st.markdown(label)
+                            st.markdown(f"> {doc.page_content[:500]}...")
+                            st.divider()
 
     st.session_state.messages.append({"role": "assistant", "content": response})
