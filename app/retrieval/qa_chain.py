@@ -1,7 +1,6 @@
-from langchain.chains import create_retrieval_chain
-from langchain.chains.combine_documents import create_stuff_documents_chain
-from langchain.chains.history_aware_retriever import create_history_aware_retriever
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain_core.runnables import RunnableLambda
+from langchain_core.output_parsers import StrOutputParser
 from langchain_groq import ChatGroq
 from langchain_chroma import Chroma
 
@@ -21,29 +20,44 @@ Otherwise, return the question as-is."""
 
 def create_qa_chain(vectorstore: Chroma, model_name: str = "llama-3.1-8b-instant"):
     llm = ChatGroq(model=model_name, temperature=0)
-
     retriever = vectorstore.as_retriever(search_kwargs={"k": 4})
 
-    question_answer_prompt = ChatPromptTemplate.from_messages([
-        ("system", SYSTEM_PROMPT),
-        MessagesPlaceholder(variable_name="chat_history"),
-        ("human", "{input}"),
-    ])
-
-    document_chain = create_stuff_documents_chain(llm, question_answer_prompt)
-
-    history_aware_prompt = ChatPromptTemplate.from_messages([
+    contextualize_q_prompt = ChatPromptTemplate.from_messages([
         ("system", CONTEXTUALIZE_PROMPT),
         MessagesPlaceholder(variable_name="chat_history"),
         ("human", "{input}"),
     ])
 
-    history_aware_retriever = create_history_aware_retriever(
-        llm, retriever, history_aware_prompt
-    )
+    qa_prompt = ChatPromptTemplate.from_messages([
+        ("system", SYSTEM_PROMPT),
+        ("human", "{input}"),
+    ])
 
-    retrieval_chain = create_retrieval_chain(
-        history_aware_retriever, document_chain
-    )
+    def run(inputs):
+        chat_history = inputs.get("chat_history", [])
 
-    return retrieval_chain
+        if chat_history:
+            standalone_question = (
+                contextualize_q_prompt | llm | StrOutputParser()
+            ).invoke(inputs)
+        else:
+            standalone_question = inputs["input"]
+
+        docs = retriever.invoke(standalone_question)
+
+        context = "\n\n".join(
+            f"Source: {d.metadata.get('source', 'Unknown')}\n{d.page_content}"
+            for d in docs
+        )
+
+        answer = (qa_prompt | llm | StrOutputParser()).invoke({
+            "input": inputs["input"],
+            "context": context,
+        })
+
+        return {
+            "answer": answer,
+            "context": docs,
+        }
+
+    return RunnableLambda(run)
