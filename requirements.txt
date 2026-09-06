@@ -13,3 +13,4 @@ langchain-groq>=0.2.0
 langchain-openai>=0.3.0
 langchain-anthropic>=0.3.0
 langchain-ollama>=0.2.0
+supabase>=2.7.0

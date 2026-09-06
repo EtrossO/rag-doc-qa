@@ -1,10 +1,10 @@
 from typing import Iterator, List, Optional
 
+from langchain_chroma import Chroma
 from langchain_core.documents import Document
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_chroma import Chroma
 
 
 SYSTEM_PROMPT = """You are a helpful assistant that answers questions based on the provided documents.
@@ -46,14 +46,23 @@ def create_llm(provider: str, model_name: str, api_key: Optional[str] = None) ->
 class QAChain:
     """Retrieval + LLM chain supporting batch (``invoke``) and streaming
     (``stream``) execution. The retrieved source documents for the most recent
-    call are exposed on ``last_context`` so the UI can render citations."""
+    call are exposed on ``last_context`` so the UI can render citations.
 
-    def __init__(self, llm, retriever, contextualize_chain, qa_prompt, k):
+    Retrieval is store-agnostic: it uses ``similarity_search`` (works on both
+    local Chroma and Supabase pgvector) and optionally restricts results to a
+    list of source file names. Because Supabase's filter is exact-match on
+    metadata (``metadata @> filter``), multi-source selection runs one query per
+    source and merges the results.
+    """
+
+    def __init__(self, llm, vectorstore, contextualize_chain, qa_prompt, k, doc_sources=None):
         self.llm = llm
-        self.retriever = retriever
+        self.vectorstore = vectorstore
         self.contextualize_chain = contextualize_chain
         self.qa_prompt = qa_prompt
         self.k = k
+        self.doc_sources = doc_sources or []
+        self.is_chroma = isinstance(vectorstore, Chroma)
         self.last_context: List[Document] = []
 
     def _standalone_question(self, inputs: dict) -> str:
@@ -62,7 +71,29 @@ class QAChain:
         return inputs["input"]
 
     def _retrieve(self, question: str) -> List[Document]:
-        docs = self.retriever.invoke(question)
+        if self.doc_sources:
+            if self.is_chroma:
+                docs = self.vectorstore.similarity_search(
+                    question,
+                    k=self.k * 3,
+                    filter={"source": {"$in": self.doc_sources}},
+                )
+            else:
+                # Exact-match filter per source, then merge.
+                per_source_k = max(3, self.k)
+                docs = []
+                for source in self.doc_sources:
+                    try:
+                        docs.extend(self.vectorstore.similarity_search(
+                            question,
+                            k=per_source_k,
+                            filter={"source": source},
+                        ))
+                    except Exception as e:
+                        print(f"Warning: retrieval failed for {source}: {e}")
+        else:
+            docs = self.vectorstore.similarity_search(question, k=self.k * 3)
+
         seen = set()
         unique: List[Document] = []
         for d in docs:
@@ -106,19 +137,14 @@ class QAChain:
 
 
 def create_qa_chain(
-    vectorstore: Chroma,
+    vectorstore,
     provider: str = "groq",
     model_name: str = "llama-3.1-8b-instant",
     api_key: Optional[str] = None,
     k: int = 4,
-    doc_filter: Optional[dict] = None,
+    doc_sources: Optional[List[str]] = None,
 ) -> QAChain:
     llm = create_llm(provider, model_name, api_key)
-
-    retriever = vectorstore.as_retriever(
-        search_type="mmr",
-        search_kwargs={"k": k, "fetch_k": k * 3, "filter": doc_filter},
-    )
 
     contextualize_q_prompt = ChatPromptTemplate.from_messages([
         ("system", CONTEXTUALIZE_PROMPT),
@@ -132,4 +158,4 @@ def create_qa_chain(
     ])
 
     contextualize_chain = contextualize_q_prompt | llm | StrOutputParser()
-    return QAChain(llm, retriever, contextualize_chain, qa_prompt, k)
+    return QAChain(llm, vectorstore, contextualize_chain, qa_prompt, k, doc_sources)

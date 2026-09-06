@@ -6,10 +6,25 @@ import streamlit as st
 from dotenv import load_dotenv
 
 from app.ingestion.loader import load_documents, chunk_documents
-from app.ingestion.vectorstore import create_vectorstore, load_vectorstore
+from app.ingestion.storage import (
+    download_documents,
+    ensure_bucket,
+    list_document_names,
+    storage_ready,
+    upload_document,
+)
+from app.ingestion.vectorstore import (
+    count_documents,
+    create_vectorstore,
+    is_supabase_configured,
+    load_vectorstore,
+)
 from app.retrieval.qa_chain import create_qa_chain
 
 load_dotenv()
+
+if storage_ready():
+    ensure_bucket()
 
 PROJECT_DIR = Path(__file__).resolve().parent.parent.parent
 DOCS_DIR = PROJECT_DIR / "data" / "documents"
@@ -38,6 +53,8 @@ if "last_provider" not in st.session_state:
 
 
 def get_available_docs() -> list:
+    if is_supabase_configured():
+        return list_document_names()
     if not DOCS_DIR.exists():
         return []
     return sorted([f.name for f in DOCS_DIR.iterdir() if f.is_file()])
@@ -66,6 +83,11 @@ def build_chat_export() -> str:
 
 
 with st.sidebar:
+    if is_supabase_configured():
+        st.info(" Online storage active: vectors in Supabase pgvector, files in Supabase Storage", icon="")
+    else:
+        st.warning("Local-only mode: index and uploads are ephemeral on hosted platforms. Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY for persistence.", icon="")
+
     st.header(" Provider Configuration")
 
     provider = st.selectbox(
@@ -104,13 +126,17 @@ with st.sidebar:
 
     if uploaded_files:
         saved = 0
+        uploaded = 0
         for f in uploaded_files:
+            content = f.getbuffer()
             dest = DOCS_DIR / f.name
             if not dest.exists():
-                dest.write_bytes(f.getbuffer())
+                dest.write_bytes(content)
                 saved += 1
-        if saved:
-            st.success(f"Saved {saved} file(s) to documents folder.")
+            if storage_ready() and upload_document(bytes(content), f.name):
+                uploaded += 1
+        if saved or uploaded:
+            st.success(f"Saved {saved} file(s) locally, uploaded {uploaded} to online storage.")
             reset_chain()
         else:
             st.info("All files already exist in documents folder.")
@@ -125,7 +151,7 @@ with st.sidebar:
     k_retrieval = st.number_input("Documents to retrieve (k)", min_value=1, max_value=20, value=4, step=1)
 
     available_docs = get_available_docs()
-    doc_filter = None
+    doc_sources = None
     if available_docs:
         st.divider()
         st.header(" Filter by Document")
@@ -134,26 +160,32 @@ with st.sidebar:
             options=available_docs,
         )
         if selected_docs:
-            doc_filter = {"source": {"$in": [str(DOCS_DIR / d) for d in selected_docs]}}
+            doc_sources = list(selected_docs)
 
     col1, col2 = st.columns(2)
     with col1:
         if st.button(" Load & Index", use_container_width=True, type="primary"):
             with st.spinner("Loading documents..."):
                 try:
-                    docs = load_documents(str(DOCS_DIR))
+                    docs = download_documents() if is_supabase_configured() else []
+                    if not docs:
+                        docs = load_documents(str(DOCS_DIR))
                     if not docs:
                         st.error(f"No documents found in {DOCS_DIR}. Upload files first.")
                     else:
                         chunks = chunk_documents(docs, chunk_size=chunk_size, chunk_overlap=chunk_overlap)
-                        vs = create_vectorstore(chunks, str(CHROMA_DIR), embedding_model=embedding_model)
+                        vs = create_vectorstore(
+                            chunks,
+                            embedding_model=embedding_model,
+                            persist_directory=str(CHROMA_DIR),
+                        )
                         chain = create_qa_chain(
                             vs,
                             provider=provider,
                             model_name=model_name,
                             api_key=api_key,
                             k=k_retrieval,
-                            doc_filter=doc_filter,
+                            doc_sources=doc_sources,
                         )
                         st.session_state.chain = chain
                         st.session_state.vectorstore_ready = True
@@ -166,21 +198,25 @@ with st.sidebar:
         if st.button(" Load Existing", use_container_width=True):
             with st.spinner("Loading vector store..."):
                 try:
-                    vs = load_vectorstore(str(CHROMA_DIR), embedding_model=embedding_model)
-                    if vs is None or len(vs.get()["ids"]) == 0:
+                    total = count_documents(persist_directory=str(CHROMA_DIR))
+                    if total == 0:
                         st.error("No existing index found. Ingest documents first.")
                     else:
+                        vs = load_vectorstore(
+                            embedding_model=embedding_model,
+                            persist_directory=str(CHROMA_DIR),
+                        )
                         chain = create_qa_chain(
                             vs,
                             provider=provider,
                             model_name=model_name,
                             api_key=api_key,
                             k=k_retrieval,
-                            doc_filter=doc_filter,
+                            doc_sources=doc_sources,
                         )
                         st.session_state.chain = chain
                         st.session_state.vectorstore_ready = True
-                        st.success(f"Loaded index with {len(vs.get()['ids'])} chunks")
+                        st.success(f"Loaded index with {total} chunks")
                         st.rerun()
                 except Exception as e:
                     st.error(f"Failed to load index: {e}")

@@ -1,10 +1,10 @@
 import os
-import sys
 
 from dotenv import load_dotenv
 
 from app.ingestion.loader import load_documents, chunk_documents
-from app.ingestion.vectorstore import create_vectorstore
+from app.ingestion.storage import download_documents
+from app.ingestion.vectorstore import create_vectorstore, is_supabase_configured
 
 load_dotenv()
 
@@ -13,8 +13,19 @@ CHROMA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "c
 
 
 def run_ingestion():
-    print(f"Loading documents from: {DOCS_DIR}")
-    docs = load_documents(DOCS_DIR)
+    if is_supabase_configured():
+        print("Supabase configured: reading documents from online storage...")
+        docs = download_documents()
+    else:
+        docs = []
+
+    if not docs:
+        print(f"Loading documents from: {DOCS_DIR}")
+        docs = load_documents(DOCS_DIR)
+
+    if not docs:
+        raise SystemExit("No documents found to index. Add files to data/documents/ or upload via the app.")
+
     print(f"Loaded {len(docs)} document(s)")
 
     chunk_size = int(os.getenv("CHUNK_SIZE", "1000"))
@@ -24,8 +35,11 @@ def run_ingestion():
 
     embedding_model = os.getenv("EMBEDDING_MODEL", "BAAI/bge-small-en-v1.5")
     print("Creating vector store...")
-    create_vectorstore(chunks, CHROMA_DIR, embedding_model=embedding_model)
-    print(f"Vector store saved to: {CHROMA_DIR}")
+    create_vectorstore(chunks, embedding_model=embedding_model, persist_directory=CHROMA_DIR)
+    if is_supabase_configured():
+        print("Indexing complete (Supabase pgvector)")
+    else:
+        print(f"Vector store saved to: {CHROMA_DIR}")
     print("Ingestion complete!")
 
 
