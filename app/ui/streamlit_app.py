@@ -84,9 +84,9 @@ def build_chat_export() -> str:
 
 with st.sidebar:
     if is_supabase_configured():
-        st.info(" Online storage active: vectors in Supabase pgvector, files in Supabase Storage", icon="")
+        st.info(" Online storage active: vectors in Supabase pgvector, files in Supabase Storage")
     else:
-        st.warning("Local-only mode: index and uploads are ephemeral on hosted platforms. Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY for persistence.", icon="")
+        st.warning("Local-only mode: index and uploads are ephemeral on hosted platforms. Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY for persistence.")
 
     st.header(" Provider Configuration")
 
@@ -112,7 +112,7 @@ with st.sidebar:
 
     api_key = os.getenv(f"{provider.upper()}_API_KEY") if provider != "ollama" else None
     if provider != "ollama" and not api_key:
-        st.warning(f"Set {provider.upper()}_API_KEY in .env", icon="")
+        st.warning(f"Set {provider.upper()}_API_KEY in .env")
 
     st.divider()
 
