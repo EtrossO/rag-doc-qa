@@ -1,0 +1,12 @@
+services:
+  rag-doc-qa:
+    build: .
+    container_name: rag-doc-qa
+    ports:
+      - "8501:8501"
+    volumes:
+      - ./data:/app/data
+      - ./.env:/app/.env
+    environment:
+      - STREAMLIT_SERVER_MAXUPLOADSIZE=50
+    restart: unless-stopped

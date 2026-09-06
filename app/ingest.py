@@ -22,7 +22,7 @@ def run_ingestion():
     chunks = chunk_documents(docs, chunk_size=chunk_size, chunk_overlap=chunk_overlap)
     print(f"Split into {len(chunks)} chunk(s)")
 
-    embedding_model = os.getenv("EMBEDDING_MODEL", "text-embedding-3-small")
+    embedding_model = os.getenv("EMBEDDING_MODEL", "BAAI/bge-small-en-v1.5")
     print("Creating vector store...")
     create_vectorstore(chunks, CHROMA_DIR, embedding_model=embedding_model)
     print(f"Vector store saved to: {CHROMA_DIR}")

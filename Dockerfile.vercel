@@ -1,0 +1,26 @@
+# Vercel container image for the Streamlit RAG app.
+# Vercel detects a Dockerfile.vercel at the repo root, builds it,
+# stores it in the Vercel Container Registry, and routes all traffic
+# to it as a Vercel Function.
+#
+# The file must listen on $PORT (default 80). See README > Deploying to Vercel.
+FROM python:3.11-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+WORKDIR /app
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY app ./app
+COPY run.py .
+
+# Runtime data (uploads + chroma index) is ephemeral on Vercel.
+# Create the directory so uploads and the index can be written at runtime.
+RUN mkdir -p /app/data/documents && chmod -R a+rwx /app/data
+
+EXPOSE 80
+
+CMD ["sh", "-c", "streamlit run app/ui/streamlit_app.py --server.address=0.0.0.0 --server.port=${PORT:-80} --server.headless=true --server.enableCORS=false --server.enableXsrfProtection=false --browser.gatherUsageStats=false --server.fileWatcherType=none"]

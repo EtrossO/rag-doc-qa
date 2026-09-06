@@ -4,3 +4,10 @@ __pycache__/
 *.pyc
 .venv/
 venv/
+
+# Vercel CLI output
+.vercel/
+
+# Editor / IDE
+.vscode/
+.idea/
